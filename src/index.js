@@ -22,6 +22,7 @@ const config = require('./config');
 const { products, getProduct, formatBRL } = require('./products');
 const { createPixCharge, getPixPaymentStatus, cancelPixCharge } = require('./payment');
 const { allTickets, getTicket, saveTicket, removeTicket, findOpenTicketForUser, getPanel, savePanel } = require('./store');
+const { publishTranscript } = require('./transcript');
 
 if (!process.env.DISCORD_TOKEN || !process.env.CLIENT_ID) {
   throw new Error('Preencha DISCORD_TOKEN e CLIENT_ID no arquivo .env antes de iniciar o bot.');
@@ -324,6 +325,19 @@ async function syncPixQrCode(channel, ticket) {
   saveTicket(ticket);
 }
 
+async function archiveTicketTranscript(channel, ticket, reason) {
+  try {
+    const url = await publishTranscript(channel, ticket, reason);
+    if (!url) return null;
+    ticket.transcriptUrl = url;
+    await channel.send({ embeds: [makeEmbed('Transcript do ticket', `O transcript está sendo publicado em: ${url}`, colors.gray)] });
+    return url;
+  } catch (error) {
+    console.error(`Falha ao gerar transcript do ticket ${ticket.channelId}:`, error.message);
+    return null;
+  }
+}
+
 async function sendClosingDm(ticket, reason) {
   const user = await client.users.fetch(ticket.ownerId).catch(() => null);
   if (!user) return;
@@ -352,6 +366,7 @@ async function closeTicketAutomatically(channelId, reason) {
         ? `<@${ticket.ownerId}> este ticket foi encerrado após **2 horas de atendimento**.`
       : `<@${ticket.ownerId}> este ticket foi encerrado por **30 minutos de inatividade**.`;
     await channel.send({ embeds: [makeEmbed('Ticket encerrado', description, reason === 'compra concluída' ? colors.green : colors.orange)] }).catch(() => null);
+    await archiveTicketTranscript(channel, ticket, reason);
   }
   await sendClosingDm(ticket, reason);
   if (channel?.deletable) setTimeout(() => channel.delete(`Encerramento automático: ${reason}`).catch(() => null), 5_000);
@@ -490,6 +505,7 @@ async function deleteTicket(interaction, ticket, reason) {
   }
   clearTicketTimers(ticket.channelId);
   await logAction(interaction.guild, 'Ticket encerrado', ticket, `**Motivo:** ${reason}\n**Responsável:** <@${interaction.user.id}>`);
+  await archiveTicketTranscript(interaction.channel, ticket, reason);
   removeTicket(ticket.channelId);
   await interaction.reply({ embeds: [makeEmbed('Ticket encerrado', 'O ticket será removido em alguns segundos.', colors.red)] });
   setTimeout(() => interaction.channel.delete(reason).catch(() => null), 2500);

@@ -19,4 +19,8 @@ Para ativar o PIX, informe `MERCADOPAGO_ACCESS_TOKEN` e um e-mail válido em `PA
 
 Para exibir o pagamento por PayPal, informe em `PAYPAL_PAYMENT_URL` o link de pagamento da sua conta (por exemplo, um link PayPal.Me ou checkout). Após o cliente concluir o pagamento, um vendedor ainda precisa confirmar a entrega no ticket.
 
+## Transcripts web
+
+Ao encerrar um ticket, o bot pode gerar um transcript HTML com todas as mensagens, data e hora, e publicá-lo no Vercel por meio do GitHub. Para ativar, crie um token de acesso restrito ao repositório com permissão **Contents: Read and write** e informe `GITHUB_TRANSCRIPT_TOKEN` no `.env`. O link público seguirá o formato `https://bot-vendas.vercel.app/transcripts/ID-DO-TICKET.html`.
+
 Os arquivos em `data/` guardam o estado dos tickets entre reinicializações e não devem ser versionados.
