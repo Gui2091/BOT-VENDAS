@@ -327,11 +327,14 @@ async function syncPixQrCode(channel, ticket) {
 
 async function archiveTicketTranscript(channel, ticket, reason) {
   try {
-    const url = await publishTranscript(channel, ticket, reason);
-    if (!url) return null;
-    ticket.transcriptUrl = url;
-    await channel.send({ embeds: [makeEmbed('Transcript do ticket', `O transcript está sendo publicado em: ${url}`, colors.gray)] });
-    return url;
+    const result = await publishTranscript(channel, ticket, reason);
+    if (!result) return null;
+    ticket.transcriptUrl = result.url;
+    await channel.send({
+      embeds: [makeEmbed('Resumo do ticket', `**Cliente:** ${result.summary.owner}\n**Atendente:** ${result.summary.attendant || '—'}\n**Pagamento:** ${result.summary.paymentMethod}\n**Valor:** ${result.summary.amount}\n**Pagamento aprovado em:** ${result.summary.paymentDate || '—'}`, colors.gray)],
+      components: [new ActionRowBuilder().addComponents(new ButtonBuilder().setLabel('Abrir transcript completo').setEmoji('📄').setStyle(ButtonStyle.Link).setURL(result.url))]
+    });
+    return result.url;
   } catch (error) {
     console.error(`Falha ao gerar transcript do ticket ${ticket.channelId}:`, error.message);
     return null;
@@ -392,6 +395,8 @@ async function checkPixPayments() {
       pixExpirationTimers.delete(ticket.channelId);
       ticket.stage = 'awaiting_delivery';
       ticket.pix.approvedAt = new Date().toISOString();
+      ticket.paymentMethod = 'pix';
+      ticket.paymentApprovedAt = ticket.pix.approvedAt;
       await setChannelStatus(channel, ticket, '🟠');
       await updateTicketView(channel, ticket);
       await channel.send({
@@ -598,6 +603,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         try {
           ticket.pix = await createPixCharge(ticket, interaction.user);
           ticket.pix.expiresAt = new Date(Date.now() + PIX_EXPIRATION_MS).toISOString();
+          ticket.paymentMethod = 'pix';
           ticket.stage = 'pix_generated';
           await updateTicketView(interaction.channel, ticket);
           schedulePixExpiration(ticket);
@@ -611,9 +617,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
         }
         return;
       } else if (id === 'flow:paypal' && ticket.stage === 'payment_method') {
+        ticket.paymentMethod = 'paypal';
         ticket.stage = 'paypal_generated';
       } else if (id === 'flow:paid' && ticket.stage === 'paypal_generated' && process.env.PAYPAL_PAYMENT_URL) {
         ticket.stage = 'awaiting_delivery';
+        ticket.paymentApprovedAt = new Date().toISOString();
         await interaction.deferUpdate();
         await setChannelStatus(interaction.channel, ticket, '🟠');
         await updateTicketView(interaction.channel, ticket);

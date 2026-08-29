@@ -29,7 +29,11 @@ function messageBody(message) {
   return parts.length ? parts.join('<br>') : '<span class="empty">Mensagem sem texto</span>';
 }
 
-function buildTranscript(ticket, messages, reason) {
+function formatCurrency(value) {
+  return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(value || 0));
+}
+
+function buildTranscript(ticket, messages, reason, summary) {
   const entries = messages.map((message) => {
     const avatar = message.author.displayAvatarURL({ extension: 'png', size: 64 });
     return `<article class="message">
@@ -51,7 +55,7 @@ function buildTranscript(ticket, messages, reason) {
     :root { color-scheme: dark; --bg:#111827; --card:#1f2937; --muted:#9ca3af; --line:#374151; --accent:#60a5fa; }
     * { box-sizing:border-box; } body { margin:0; background:var(--bg); color:#f9fafb; font:15px/1.5 Inter,Segoe UI,Arial,sans-serif; }
     header { padding:28px max(20px,calc((100vw - 900px)/2)); border-bottom:1px solid var(--line); background:#0f172a; }
-    h1 { margin:0 0 6px; font-size:22px; } .summary { margin:0; color:var(--muted); }
+    h1 { margin:0 0 16px; font-size:22px; } .details { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:10px; } .details span { padding:9px 10px; background:#1f2937; border:1px solid var(--line); border-radius:6px; color:#e5e7eb; overflow-wrap:anywhere; } .details b { display:block; color:var(--muted); font-size:11px; margin-bottom:2px; text-transform:uppercase; }
     main { width:min(900px,100%); margin:auto; padding:20px; } .message { display:flex; gap:12px; padding:14px 0; border-bottom:1px solid var(--line); }
     .avatar { width:40px; height:40px; border-radius:50%; object-fit:cover; } .message-content { min-width:0; flex:1; }
     .meta { display:flex; align-items:center; gap:8px; } time { color:var(--muted); font-size:12px; } .bot { color:#bfdbfe; background:#1d4ed8; border-radius:4px; padding:1px 5px; font-size:10px; font-weight:700; }
@@ -60,7 +64,18 @@ function buildTranscript(ticket, messages, reason) {
   </style>
 </head>
 <body>
-  <header><h1>Transcript do ticket • ${escapeHtml(ticket.ownerName)}</h1><p class="summary">Cliente: ${escapeHtml(ticket.ownerName)} • Encerrado em ${formatDate(new Date())} • Motivo: ${escapeHtml(reason)}</p></header>
+  <header>
+    <h1>Transcript do ticket • ${escapeHtml(ticket.ownerName)}</h1>
+    <div class="details">
+      <span><b>Cliente</b>${escapeHtml(summary.owner)}</span>
+      <span><b>Atendente</b>${escapeHtml(summary.attendant || '—')}</span>
+      <span><b>Pagamento</b>${escapeHtml(summary.paymentMethod)}</span>
+      <span><b>Valor</b>${escapeHtml(summary.amount)}</span>
+      <span><b>Pagamento aprovado em</b>${escapeHtml(summary.paymentDate || '—')}</span>
+      <span><b>Ticket encerrado em</b>${formatDate(new Date())}</span>
+      <span><b>Motivo</b>${escapeHtml(reason)}</span>
+    </div>
+  </header>
   <main>${entries || '<p>Nenhuma mensagem encontrada.</p>'}</main>
 </body>
 </html>`;
@@ -84,8 +99,20 @@ async function publishTranscript(channel, ticket, reason) {
   const repository = process.env.GITHUB_TRANSCRIPT_REPOSITORY || 'Gui2091/BOT-VENDAS';
   const branch = process.env.GITHUB_TRANSCRIPT_BRANCH || 'main';
   const baseUrl = (process.env.TRANSCRIPT_BASE_URL || 'https://bot-vendas.vercel.app').replace(/\/$/, '');
+  const attendantMember = ticket.assignedTo
+    ? await channel.guild.members.fetch(ticket.assignedTo).catch(() => null)
+    : null;
+  const paymentMethod = ticket.paymentMethod === 'pix' ? 'PIX' : ticket.paymentMethod === 'paypal' ? 'PayPal' : 'Não informado';
+  const paymentDate = ticket.paymentApprovedAt || ticket.pix?.approvedAt || null;
+  const summary = {
+    owner: ticket.ownerName,
+    attendant: attendantMember?.displayName || '',
+    paymentMethod,
+    amount: formatCurrency(ticket.total),
+    paymentDate: paymentDate ? formatDate(paymentDate) : ''
+  };
   const messages = await fetchTranscriptMessages(channel);
-  const html = buildTranscript(ticket, messages, reason);
+  const html = buildTranscript(ticket, messages, reason, summary);
   const path = `public/transcripts/${ticket.channelId}.html`;
   const response = await fetch(`https://api.github.com/repos/${repository}/contents/${path}`, {
     method: 'PUT',
@@ -102,7 +129,7 @@ async function publishTranscript(channel, ticket, reason) {
     })
   });
   if (!response.ok) throw new Error(`Falha ao publicar transcript no GitHub (${response.status}): ${(await response.text()).slice(0, 180)}`);
-  return `${baseUrl}/transcripts/${ticket.channelId}.html`;
+  return { url: `${baseUrl}/transcripts/${ticket.channelId}.html`, summary };
 }
 
 module.exports = { publishTranscript };
